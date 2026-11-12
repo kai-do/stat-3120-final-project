@@ -1,0 +1,14 @@
+# RStudio / R session files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# 1.6 GB NFIRS incident-level extract (too large for GitHub; not redistributed)
+*.fst
+
+# Course handouts (rubric, instructions, group assessment) - not ours to publish
+docs/
+
+# Stale duplicate of the main document from another machine
+*-DESKTOP-*.qmd

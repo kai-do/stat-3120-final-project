@@ -1,0 +1,290 @@
+---
+title: "Fire Department Response Times"
+author: "Gabriel Salisbury and Nakai Zemer"
+format: 
+  html:
+    page-layout: full
+    code-fold: true
+    embed-resources: true
+---
+
+```{r setup}
+
+library(tidyverse)
+library(ggpubr)
+library(moments)
+library(knitr)
+library(kableExtra)
+library(fst)
+
+```
+
+
+```{r}
+
+incident_df <- read.fst("./datasets/basicincident_2019.fst", columns = c("INCIDENT_KEY", "STATE", "FDID", "INC_NO", "EXP_NO", "INC_TYPE", "AID", "ALARM", "ARRIVAL", "CENSUS"))
+
+colnames(incident_df)
+
+```
+
+
+```{r}
+
+nfirs_dept_df <- read.csv("./datasets/nfirs_dept.csv") %>%
+  mutate(fire_and_hazmat = inci_type_cat_1 + inci_type_cat_2 + inci_type_cat_4,
+         rescue_and_ems = inci_type_cat_3,
+         public_service = inci_type_cat_5 + inci_type_cat_6 + inci_type_cat_7 + inci_type_cat_8,
+         population_density = round(estimated_population / estimated_area_sq_mi),
+         dept_type_condensed = as.factor(case_when(dept_type %in% c("Career", "Mostly career") ~ "Career",
+                                   TRUE ~ "Volunteer")),
+         response_time_category = as.factor(case_when(mean_response_time_mins <= 7.5 ~ "Fast",
+                                                  TRUE ~ "Slow")))
+
+```
+
+```{r desc-stats}
+
+
+response_times_by_dept_type_desc_stats_df <- nfirs_dept_df %>%
+  group_by(dept_type_condensed) %>%
+  summarise(
+    n_depts = n(),
+    mean_response_time = mean(mean_response_time_mins, na.rm = TRUE),
+    sd_mean_response_time = sd(mean_response_time_mins, na.rm = TRUE),
+    min_mean_response_time = min(mean_response_time_mins, na.rm = TRUE),
+    q1_mean_response_time = quantile(mean_response_time_mins, 0.25),
+    median_mean_response_time = median(mean_response_time_mins, na.rm = TRUE),
+    q3_mean_response_time = quantile(mean_response_time_mins, 0.75),
+    max_response_time = max(mean_response_time_mins, na.rm = TRUE)
+  ) %>%
+  union(
+    nfirs_dept_df %>%
+      summarise(
+        dept_type_condensed = "All Departments",
+        n_depts = n(),
+        mean_response_time = mean(mean_response_time_mins, na.rm = TRUE),
+        sd_mean_response_time = sd(mean_response_time_mins, na.rm = TRUE),
+        min_mean_response_time = min(mean_response_time_mins, na.rm = TRUE),
+        q1_mean_response_time = quantile(mean_response_time_mins, 0.25),
+        median_mean_response_time = median(mean_response_time_mins, na.rm = TRUE),
+        q3_mean_response_time = quantile(mean_response_time_mins, 0.75),
+        max_response_time = max(mean_response_time_mins, na.rm = TRUE)
+      )
+  ) %>%
+  mutate_if(is.numeric, round, digits = 3)
+
+response_times_by_dept_type_desc_stats_df %>%
+  kbl()
+
+```
+
+## Response Time with No Aggregation Before Exclusion Criteria
+
+### Descriptive Statistics
+
+```{r before-exclusion-descriptive-stats, warning=FALSE, echo=TRUE, error=FALSE}
+
+nfirs_dept_df %>%
+  get_summary_stats(response_time_mins, type = "full",
+                    show = c("n", "min", 
+                             "q1", "median", "q3",  "max", "iqr", 
+                             "mean", "sd")) %>%
+  rename_with(.cols = everything(), .fn = title_columns) %>%
+  rename(n = N,
+         IQR = Iqr
+
+
+         ) %>%
+  kbl() %>%
+  kable_material(c("striped", "hover"))
+
+```
+
+```{r t-test}
+# equal variance
+t.test(mean_response_time_mins ~ dept_type_condensed, data = nfirs_dept_df, var.equal = TRUE)
+
+# unequal variance
+t.test(mean_response_time_mins ~ dept_type_condensed, data = nfirs_dept_df, var.equal = FALSE)
+
+nfirs_dept_df %>%
+  ggplot(aes(x = mean_response_time_mins)) +
+  geom_histogram()
+
+nfirs_dept_df %>%
+  ggplot(aes(x = mean_response_time_mins)) +
+  geom_boxplot()
+
+skewness(nfirs_dept_df$mean_response_time_mins)
+kurtosis(nfirs_dept_df$mean_response_time_mins)
+
+moments::agostino.test(nfirs_dept_df$mean_response_time_mins)
+moments::anscombe.test(nfirs_dept_df$mean_response_time_mins)
+
+var.test(mean_response_time_mins ~ dept_type_condensed, data = nfirs_dept_df)
+
+```
+
+```{r}
+
+library(ggplot2)
+
+nfirs_dept_df %>%
+  ggplot() +
+  geom_smooth(aes(x = population_density,
+                  y = mean_response_time_mins),
+              method = "lm") +
+  geom_point(aes(x = population_density,
+                 y = mean_response_time_mins,
+                 color = dept_type_condensed)) +
+  labs(
+    title = "Population Density and Mean Response Time",
+    subtitle = "2019",
+    x = "Population Density (Population per square mile)",
+    y = "Mean Response Time (Minutes)",
+    color = "Department Type (Condensed)"
+  ) +
+  geom_smooth(
+    aes(x = population_density,
+        y = mean_response_time_mins,
+        color = dept_type_condensed),
+    method = "lm"
+  ) +
+  ylim(0, 21) +
+  scale_color_manual(values = c("#4472c4", "#C49644")) +
+  theme(legend.position = "bottom",
+        text = element_text(size = 20)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+  # Double the base font size
+
+
+
+```
+
+```{r correlation-analysis}
+
+nfirs_dept_df %>%
+  ggplot() +
+  geom_smooth(aes(x = population_density,
+                  y = mean_response_time_mins),
+              method = "lm") +
+  geom_point(aes(x = population_density,
+                 y = mean_response_time_mins,
+                 color = dept_type_condensed)) +
+  labs(
+    title = "Population Density and Mean Response Time",
+    subtitle = "2019",
+    x = "Population Density (Population per square mile)",
+    y = "Mean Response Time (Minutes)",
+    color = "Department Type (Condensed)"
+  ) +
+  geom_smooth(
+    aes(x = population_density,
+        y = mean_response_time_mins,
+        color = dept_type_condensed),
+    method = "lm"
+  ) +
+  ylim(0, 21) +
+  theme(legend.position = "bottom")
+
+
+
+cor(x = nfirs_dept_df$population_density, y = nfirs_dept_df$mean_response_time_mins)
+
+
+cor.test(x = nfirs_dept_df$population_density, y = nfirs_dept_df$mean_response_time_mins)
+
+
+ggplot(data = nfirs_dept_df %>% filter(dept_type_condensed == "Career"), aes(x = population_density, 
+                                 y = mean_response_time_mins, 
+                                 color = dept_type_condensed )) +
+  geom_point()
+
+cor(x = (nfirs_dept_df %>% filter(dept_type_condensed == "Career"))$population_density, 
+    y = (nfirs_dept_df %>% filter(dept_type_condensed == "Career"))$mean_response_time_mins)
+
+cor.test(x = (nfirs_dept_df %>% filter(dept_type_condensed == "Career"))$population_density, 
+    y = (nfirs_dept_df %>% filter(dept_type_condensed == "Career"))$mean_response_time_mins)
+
+ggplot(data = nfirs_dept_df %>% filter(dept_type_condensed == "Volunteer"), aes(x = population_density, 
+                                 y = mean_response_time_mins, 
+                                 color = dept_type_condensed )) +
+  geom_point()
+
+cor(x = (nfirs_dept_df %>% filter(dept_type_condensed == "Volunteer"))$population_density, 
+    y = (nfirs_dept_df %>% filter(dept_type_condensed == "Volunteer"))$mean_response_time_mins)
+
+cor.test(x = (nfirs_dept_df %>% filter(dept_type_condensed == "Volunteer"))$population_density, 
+    y = (nfirs_dept_df %>% filter(dept_type_condensed == "Volunteer"))$mean_response_time_mins)
+
+ggscatter(nfirs_dept_df, x = "population_density", y = "mean_response_time_mins", 
+          add = "reg.line", cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Population per Square Mile", ylab = "Mean Response Time (Minutes)")
+
+ggscatterhist(nfirs_dept_df, x = "population_density", y = "mean_response_time_mins", 
+          add = "reg.line", cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Population per Square Mile", ylab = "Mean Response Time (Minutes)")
+
+```
+
+```{r chi-square}
+
+chisq <- chisq.test(nfirs_dept_df$dept_type, nfirs_dept_df$response_time_category)
+
+chisq
+
+chisq$residuals %>% kbl()
+chisq$expected %>% kbl()
+chisq$observed %>% kbl()
+
+resid_df <-
+  rownames_to_column(as.data.frame(chisq$expected), "nfirs_dept_df.dept_type") %>%
+  pivot_longer(cols = c(Fast, Slow),
+               names_to = "response_time_category",
+               values_to = "expected") %>%
+  inner_join(
+    as.data.frame(chisq$observed) %>%
+      rename(response_time_category = Var2,
+             observed = Freq)
+  ) %>%
+  inner_join(
+    as.data.frame(chisq$residuals) %>%
+      rename(response_time_category = Var2,
+             residual = Freq)
+  ) %>%
+  rename(dept_type_expanded = nfirs_dept_df.dept_type) %>%
+  mutate(diff = observed - expected)
+
+resid_df %>%
+  ggplot(aes(x = dept_type_expanded, y = residual, fill = response_time_category)) +
+  geom_bar(stat = "identity")
+
+resid_df %>%
+  ggplot(aes(x = dept_type_expanded, y = expected, fill = response_time_category)) +
+  geom_bar(stat = "identity", position = "dodge")
+
+
+resid_df %>%
+  ggplot(aes(x = dept_type_expanded, y = diff, fill = response_time_category)) +
+  geom_bar(stat = "identity", position = "dodge")
+
+resid_df %>%
+  ggplot(aes(x = response_time_category, y = diff, fill = dept_type_expanded)) +
+  geom_bar(stat = "identity", position = "dodge") +
+    labs(
+    title = "Departments and Response Time Category",
+    subtitle = "2019",
+    x = "Response Time Category",
+    y = "Observed - Expected",
+    color = "Department Type (Expanded)"
+  ) +   scale_fill_manual(values = c("#C49644", "#e1caa1", "#a1b8e1", "#4472c4")) +
+  theme(legend.position = "bottom",
+        text = element_text(size = 20)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+  # Double the base font size
+
+
+```
